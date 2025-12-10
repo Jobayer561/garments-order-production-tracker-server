@@ -51,6 +51,7 @@ async function run() {
   try {
     const db = client.db("garments-tracker");
     const usersCollection = db.collection("users");
+    const productsCollection = db.collection('products');
 
     app.post("/user", async (req, res) => {
       const userData = req.body;
@@ -72,6 +73,11 @@ async function run() {
       const result = await usersCollection.insertOne(userData);
       res.send(result);
     });
+
+    app.get('/products',async(req,res)=>{
+    const result = await productsCollection.find().toArray();
+    res.send(result)
+    })
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
