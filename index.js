@@ -51,11 +51,11 @@ async function run() {
   try {
     const db = client.db("garments-tracker");
     const usersCollection = db.collection("users");
-    const productsCollection = db.collection('products');
+    const productsCollection = db.collection("products");
 
     app.post("/user", async (req, res) => {
       const userData = req.body;
-      userData.status = 'pending'
+      userData.status = "pending";
       userData.created_at = new Date().toISOString();
       userData.last_loggedIn = new Date().toISOString();
       const query = {
@@ -74,10 +74,15 @@ async function run() {
       res.send(result);
     });
 
-    app.get('/products',async(req,res)=>{
-    const result = await productsCollection.find().toArray();
-    res.send(result)
-    })
+    app.get("/products", async (req, res) => {
+      const result = await productsCollection.find().limit(6).toArray();
+      res.send(result);
+    });
+
+    app.get("/allProducts", async (req, res) => {
+      const result = await productsCollection.find().toArray();
+      res.send(result);
+    });
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
