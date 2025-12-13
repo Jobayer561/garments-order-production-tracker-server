@@ -1,7 +1,8 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+
 // const admin = require("firebase-admin");
 const port = process.env.PORT || 3000;
 // const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
@@ -73,9 +74,18 @@ async function run() {
       const result = await usersCollection.insertOne(userData);
       res.send(result);
     });
-
+    app.get("/user/role", async (req, res) => {
+      const email = req.query.email;
+      const result = await usersCollection.findOne({ email: email });
+      res.send({ role: result?.role });
+    });
     app.get("/products", async (req, res) => {
-      const result = await productsCollection.find().limit(6).toArray();
+      const result = await productsCollection
+        .find({ showOnHomePage: true })
+        .sort({ created_at: -1 })
+        .limit(6)
+        .toArray();
+
       res.send(result);
     });
 
@@ -83,6 +93,25 @@ async function run() {
       const result = await productsCollection.find().toArray();
       res.send(result);
     });
+    app.post("/allProducts", async (req, res) => {
+      const productData = req.body;
+
+      productData.created_at = new Date();
+
+      console.log(productData);
+
+      const result = await productsCollection.insertOne(productData);
+      res.send(result);
+    });
+    app.get("/allProducts/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await productsCollection.findOne({
+        _id: new ObjectId(id),
+      });
+      res.send(result);
+    });
+
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
