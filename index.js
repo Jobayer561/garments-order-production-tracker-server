@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 // const admin = require("firebase-admin");
 const port = process.env.PORT || 3000;
@@ -111,7 +112,38 @@ async function run() {
       res.send(result);
     });
 
+    app.post("/create-checkout-session", async (req, res) => {
+      const paymentInfo = req.body;
+      console.log("PAYMENT INFO 👉", paymentInfo);
 
+      const session = await stripe.checkout.sessions.create({
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: {
+                name: paymentInfo?.title,
+                description: paymentInfo?.description,
+                images: paymentInfo?.images || [],
+              },
+              unit_amount: paymentInfo?.price * 100,
+            },
+            quantity: 1,
+          },
+        ],
+        customer_email: paymentInfo?.customer?.email,
+        mode: "payment",
+        metadata: {
+          productId: paymentInfo?.productId,
+          customer: paymentInfo?.customer.email,
+        },
+        success_url: `${process.env.CLIENT_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.CLIENT_DOMAIN}/plant/${paymentInfo?.productId}`,
+      });
+
+      res.send({ url: session.url });
+    });
+       
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
