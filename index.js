@@ -77,6 +77,21 @@ async function run() {
       };
       return await trackingsCollection.insertOne(log);
     };
+    app.get("/user", async (req, res) => {
+      const result = await usersCollection
+        .find()
+        .sort({ created_at: -1 })
+        .toArray();
+      res.send(result);
+    });
+    app.get("/profile", async (req, res) => {
+      const query = {};
+      const { email } = req.query;
+
+      const result = await usersCollection.findOne({ email });
+      console.log(result);
+      res.json(result);
+    });
 
     app.post("/user", async (req, res) => {
       const userData = req.body;
@@ -103,6 +118,30 @@ async function run() {
       const result = await usersCollection.findOne({ email: email });
       res.send({ role: result?.role });
     });
+    app.patch("/update-status", async (req, res) => {
+      const { email, status, reason, feedback } = req.body;
+
+      const updateDoc = {
+        status,
+      };
+      if (status === "suspend") {
+        updateDoc.reason = reason || "";
+        updateDoc.feedback = feedback || "";
+      } else {
+        updateDoc.reason = "";
+        updateDoc.feedback = "";
+      }
+      const result = await usersCollection.updateOne(
+        { email },
+        { $set: updateDoc }
+      );
+      if (result.modifiedCount) {
+        res.send({ message: "User status updated successfully" });
+      } else {
+        res.status(400).send({ message: "No changes were made" });
+      }
+    });
+
     app.get("/products", async (req, res) => {
       const result = await productsCollection
         .find({ showOnHomePage: true })
@@ -154,14 +193,14 @@ async function run() {
             quantity: Number(paymentInfo.quantity),
           },
         ],
-        customer_email: paymentInfo.buyer.email,
+        customer_email: paymentInfo.Buyer.email,
 
         mode: "payment",
         metadata: {
           productId: paymentInfo.productId,
           productName: paymentInfo.title,
-          buyerName: paymentInfo.buyer.name,
-          buyerEmail: paymentInfo.buyer.email,
+          BuyerName: paymentInfo.Buyer.name,
+          BuyerEmail: paymentInfo.Buyer.email,
         },
         success_url: `${process.env.CLIENT_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${process.env.CLIENT_DOMAIN}/payment-cancel`,
@@ -196,9 +235,9 @@ async function run() {
           trackingId: trackingId,
           transactionId: session.payment_intent,
 
-          buyer: {
-            name: session.metadata.buyerName,
-            email: session.metadata.buyerEmail,
+          Buyer: {
+            name: session.metadata.BuyerName,
+            email: session.metadata.BuyerEmail,
           },
 
           product: {
@@ -259,7 +298,7 @@ async function run() {
     //     const orderInfo = {
     //       productId: session.metadata.plantId,
     //       transactionId: session.payment_intent,
-    //       buyer: session.metadata.buyer,
+    //       Buyer: session.metadata.Buyer,
     //       status: "pending",
     //       seller: product.seller,
     //       name: plant.name,
