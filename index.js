@@ -164,6 +164,43 @@ async function run() {
 
       res.send(result);
     });
+    app.patch("/products/:id/home", async (req, res) => {
+      const { id } = req.params;
+      console.log("PARAM ID:", req.params.id);
+
+      const { showOnHomePage } = req.body;
+
+      const result = await productsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { showOnHomePage } }
+      );
+
+      res.send(result);
+    });
+    app.delete("/products/:id", async (req, res) => {
+      const { id } = req.params;
+      console.log(id);
+      const result = await productsCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+
+      res.send(result);
+    });
+    app.patch("/products/:id", async (req, res) => {
+      const { id } = req.params;
+      const updatedData = req.body;
+
+      updatedData.updated_at = new Date();
+
+      const result = await productsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: updatedData,
+        }
+      );
+
+      res.send(result);
+    });
 
     app.get("/allProducts", async (req, res) => {
       const result = await productsCollection.find().toArray();
@@ -263,7 +300,7 @@ async function run() {
           quantity: 1,
           totalPrice: session.amount_total / 100,
           paymentMethod: "PayFirst",
-          status: "Pending",
+          status: "pending",
           approvedBy: null,
           approvedAt: null,
           rejectedAt: null,
@@ -295,6 +332,7 @@ async function run() {
         trackingId,
       });
     });
+
 
     // app.post("/payment-success", async (req, res) => {
     //   const { sessionId } = req.body;
