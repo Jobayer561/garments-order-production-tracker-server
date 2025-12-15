@@ -78,10 +78,23 @@ async function run() {
       return await trackingsCollection.insertOne(log);
     };
     app.get("/user", async (req, res) => {
+      const { searchText, role } = req.query;
+      const query = {};
+      if (searchText) {
+        query.$or = [
+          { name: { $regex: searchText, $options: "i" } },
+          { email: { $regex: searchText, $options: "i" } },
+        ];
+      }
+      if (role) {
+        query.role = role;
+      }
+
       const result = await usersCollection
-        .find()
+        .find(query)
         .sort({ created_at: -1 })
         .toArray();
+
       res.send(result);
     });
     app.get("/profile", async (req, res) => {
@@ -158,7 +171,7 @@ async function run() {
     });
     app.post("/allProducts", async (req, res) => {
       const productData = req.body;
-
+      productData.created_By = productData.email;
       productData.created_at = new Date();
 
       console.log(productData);
