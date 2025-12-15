@@ -332,7 +332,25 @@ async function run() {
         trackingId,
       });
     });
+    app.get("/orders", async (req, res) => {
+      const { searchText, status } = req.query;
+      const query = {};
 
+      if (searchText) {
+        query["buyer.email"] = { $regex: searchText, $options: "i" };
+      }
+
+      if (status) {
+        query.status = status;
+      }
+
+      const result = await ordersCollection
+        .find(query)
+        .sort({ created_at: -1 })
+        .toArray();
+
+      res.send(result);
+    });
 
     // app.post("/payment-success", async (req, res) => {
     //   const { sessionId } = req.body;
