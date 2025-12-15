@@ -3,6 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const crypto = require("crypto");
 
 // const admin = require("firebase-admin");
 const port = process.env.PORT || 3000;
@@ -13,7 +14,12 @@ const port = process.env.PORT || 3000;
 // admin.initializeApp({
 //   credential: admin.credential.cert(serviceAccount),
 // });
-
+function generateTrackingId() {
+  const prefix = "ORD";
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const random = crypto.randomBytes(3).toString("hex").toUpperCase();
+  return `${prefix}-${date}-${random}`;
+}
 const app = express();
 // middleware
 app.use(
@@ -54,6 +60,23 @@ async function run() {
     const db = client.db("garments-tracker");
     const usersCollection = db.collection("users");
     const productsCollection = db.collection("products");
+    const ordersCollection = db.collection("orders");
+    const trackingsCollection = db.collection("trackings");
+    const logOrderTracking = async (
+      trackingId,
+      status,
+      location = "",
+      note = ""
+    ) => {
+      const log = {
+        trackingId,
+        status,
+        location,
+        note,
+        createdAt: new Date(),
+      };
+      return await trackingsCollection.insertOne(log);
+    };
 
     app.post("/user", async (req, res) => {
       const userData = req.body;
@@ -114,36 +137,159 @@ async function run() {
 
     app.post("/create-checkout-session", async (req, res) => {
       const paymentInfo = req.body;
-      console.log("PAYMENT INFO 👉", paymentInfo);
+      console.log("PayMent Info", paymentInfo);
 
       const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
         line_items: [
           {
             price_data: {
               currency: "usd",
+              unit_amount: Math.round(Number(paymentInfo.price) * 100),
               product_data: {
-                name: paymentInfo?.title,
-                description: paymentInfo?.description,
-                images: paymentInfo?.images || [],
+                name: paymentInfo.title,
+                images: paymentInfo.images?.slice(0, 1) || [],
               },
-              unit_amount: paymentInfo?.price * 100,
             },
-            quantity: 1,
+            quantity: Number(paymentInfo.quantity),
           },
         ],
-        customer_email: paymentInfo?.customer?.email,
+        customer_email: paymentInfo.buyer.email,
+
         mode: "payment",
         metadata: {
-          productId: paymentInfo?.productId,
-          customer: paymentInfo?.customer.email,
+          productId: paymentInfo.productId,
+          productName: paymentInfo.title,
+          buyerName: paymentInfo.buyer.name,
+          buyerEmail: paymentInfo.buyer.email,
         },
         success_url: `${process.env.CLIENT_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.CLIENT_DOMAIN}/plant/${paymentInfo?.productId}`,
+        cancel_url: `${process.env.CLIENT_DOMAIN}/payment-cancel`,
       });
-
+      console.log("hello from session", session);
       res.send({ url: session.url });
     });
-       
+
+    app.post("/payment-success", async (req, res) => {
+      const { sessionId } = req.body;
+      console.log("from sessionId", sessionId);
+
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      console.log("Stripe session metadata:", session.metadata);
+
+      const product = await productsCollection.findOne({
+        _id: new ObjectId(session.metadata.productId),
+      });
+
+      if (!product)
+        return res.status(404).send({ message: "Product not found" });
+
+      const order = await ordersCollection.findOne({
+        transactionId: session.payment_intent,
+      });
+
+      const trackingId = generateTrackingId();
+
+      if (session.status === "complete" && !order) {
+        const orderInfo = {
+          productId: product._id,
+          trackingId: trackingId,
+          transactionId: session.payment_intent,
+
+          buyer: {
+            name: session.metadata.buyerName,
+            email: session.metadata.buyerEmail,
+          },
+
+          product: {
+            name: product.title,
+            category: product.category,
+            image: product.images?.[0] || "",
+            price: product.price,
+          },
+
+          quantity: 1,
+          totalPrice: session.amount_total / 100,
+          paymentMethod: "PayFirst",
+          status: "Pending",
+          approvedBy: null,
+          approvedAt: null,
+          rejectedAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const result = await ordersCollection.insertOne(orderInfo);
+
+        await productsCollection.updateOne(
+          { _id: product._id },
+          { $inc: { availableQuantity: -1 } }
+        );
+
+        await logOrderTracking(trackingId, "Order Created");
+
+        return res.send({
+          success: true,
+          orderId: result.insertedId,
+          trackingId,
+          transactionId: session.payment_intent,
+        });
+      }
+
+      return res.send({
+        success: false,
+        message: "Order already exists or payment not complete",
+        transactionId: session.payment_intent,
+        trackingId,
+      });
+    });
+
+    // app.post("/payment-success", async (req, res) => {
+    //   const { sessionId } = req.body;
+    //   const session = await stripe.checkout.sessions.retrieve(sessionId);
+    //   const product = await productsCollection.findOne({
+    //     _id: new ObjectId(session.metadata.plantId),
+    //   });
+
+    //   const order = await ordersCollection.findOne({
+    //     transactionId: session.payment_intent,
+    //   });
+    //   if (session.status === "complete" && product && !order) {
+    //     //save order data in db
+    //     const orderInfo = {
+    //       productId: session.metadata.plantId,
+    //       transactionId: session.payment_intent,
+    //       buyer: session.metadata.buyer,
+    //       status: "pending",
+    //       seller: product.seller,
+    //       name: plant.name,
+    //       category: plant.category,
+    //       quantity: 1,
+    //       price: session.amount_total / 100,
+    //       image: plant?.image,
+    //     };
+    //     console.log(orderInfo);
+    //     // const result = await ordersCollection.insertOne(orderInfo);
+    //     // // update plant quantity
+    //     // await plantsCollection.updateOne(
+    //     //   {
+    //     //     _id: new ObjectId(session.metadata.plantId),
+    //     //   },
+    //     //   { $inc: { quantity: -1 } }
+    //     // );
+
+    //     // return res.send({
+    //     //   transactionId: session.payment_intent,
+    //     //   orderId: result.insertedId,
+    //     // });
+    //   }
+    //   // res.send(
+    //   //   res.send({
+    //   //     transactionId: session.payment_intent,
+    //   //     orderId: order._id,
+    //   //   })
+    //   // );
+    // });
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
