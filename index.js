@@ -335,9 +335,11 @@ async function run() {
     app.get("/orders", async (req, res) => {
       const { searchText, status } = req.query;
       const query = {};
-
       if (searchText) {
-        query["buyer.email"] = { $regex: searchText, $options: "i" };
+        query.$or = [
+          { "buyer.name": { $regex: searchText, $options: "i" } },
+          { "buyer.email": { $regex: searchText, $options: "i" } },
+        ];
       }
 
       if (status) {
@@ -350,6 +352,15 @@ async function run() {
         .toArray();
 
       res.send(result);
+    });
+    app.get("/orders/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await ordersCollection.findOne({ _id: new ObjectId(id) });
+      const trackingHistory = await trackingsCollection
+        .find({ trackingId: result.trackingId })
+        .sort({ createdAt: 1 })
+        .toArray();
+      res.send({ ...result, trackingHistory });
     });
 
     // app.post("/payment-success", async (req, res) => {
