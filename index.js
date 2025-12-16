@@ -362,6 +362,39 @@ async function run() {
         .toArray();
       res.send({ ...result, trackingHistory });
     });
+    app.get("/manager-created", async (req, res) => {
+      const { email, search, category } = req.query;
+
+      const query = {
+        created_By: email,
+      };
+
+      if (search) {
+        query.title = { $regex: search, $options: "i" };
+      }
+
+      if (category) {
+        query.category = category;
+      }
+
+      const products = await productsCollection.find(query).toArray();
+      res.send(products);
+    });
+    app.patch("/manage-products/:id", async (req, res) => {
+      const { id } = req.params;
+      const updatedData = req.body;
+
+      updatedData.updated_at = new Date();
+
+      const result = await productsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: updatedData,
+        }
+      );
+
+      res.send(result);
+    });
 
     // app.post("/payment-success", async (req, res) => {
     //   const { sessionId } = req.body;
