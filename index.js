@@ -6,7 +6,7 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const crypto = require("crypto");
 
 // const admin = require("firebase-admin");
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 4000;
 // const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
 //   "utf-8"
 // );
@@ -394,6 +394,45 @@ async function run() {
       );
 
       res.send(result);
+    });
+    app.get("/orders-pending", async (req, res) => {
+      const orders = await ordersCollection
+        .find({ status: "pending" })
+        .toArray();
+
+      res.send(orders);
+    });
+    app.patch("/orders-pending/:id", async (req, res) => {
+      const { id } = req.params;
+      const { status } = req.body;
+
+      const updateDoc = {
+        status,
+      };
+
+      if (status === "approved") {
+        updateDoc.approvedAt = new Date();
+        updateDoc.updatedAt = new Date();
+      }
+
+      if (status === "rejected") {
+        updateDoc.rejectedAt = new Date();
+        updateDoc.updatedAt = new Date();
+      }
+
+      const result = await ordersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: updateDoc }
+      );
+
+      res.send(result);
+    });
+
+    app.get('/approve-orders', async (req, res) => {
+      const orders = await ordersCollection
+        .find({ status: "approved" })
+        .toArray();
+      res.send(orders);
     });
 
     // app.post("/payment-success", async (req, res) => {
