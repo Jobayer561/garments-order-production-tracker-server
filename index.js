@@ -5,15 +5,15 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const crypto = require("crypto");
 
-// const admin = require("firebase-admin");
+const admin = require("firebase-admin");
 const port = process.env.PORT || 4000;
-// const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
-//   "utf-8"
-// );
-// const serviceAccount = JSON.parse(decoded);
-// admin.initializeApp({
-//   credential: admin.credential.cert(serviceAccount),
-// });
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
+  "utf-8"
+);
+const serviceAccount = JSON.parse(decoded);
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
 function generateTrackingId() {
   const prefix = "ORD";
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
@@ -32,20 +32,20 @@ app.use(
 app.use(express.json());
 
 // jwt middlewares
-// const verifyJWT = async (req, res, next) => {
-//   const token = req?.headers?.authorization?.split(" ")[1];
-//   console.log(token);
-//   if (!token) return res.status(401).send({ message: "Unauthorized Access!" });
-//   try {
-//     const decoded = await admin.auth().verifyIdToken(token);
-//     req.tokenEmail = decoded.email;
-//     console.log(decoded);
-//     next();
-//   } catch (err) {
-//     console.log(err);
-//     return res.status(401).send({ message: "Unauthorized Access!", err });
-//   }
-// };
+const verifyJWT = async (req, res, next) => {
+  const token = req?.headers?.authorization?.split(" ")[1];
+  console.log(token);
+  if (!token) return res.status(401).send({ message: "Unauthorized Access!" });
+  try {
+    const decoded = await admin.auth().verifyIdToken(token);
+    req.tokenEmail = decoded.email;
+    console.log(decoded);
+    next();
+  } catch (err) {
+    console.log(err);
+    return res.status(401).send({ message: "Unauthorized Access!", err });
+  }
+};
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(process.env.MONGODB_URI, {
@@ -77,7 +77,7 @@ async function run() {
       };
       return await trackingsCollection.insertOne(log);
     };
-    app.get("/user", async (req, res) => {
+    app.get("/user", verifyJWT, async (req, res) => {
       const { searchText, role } = req.query;
       const query = {};
       if (searchText) {
@@ -97,7 +97,7 @@ async function run() {
 
       res.send(result);
     });
-    app.get("/profile", async (req, res) => {
+    app.get("/profile", verifyJWT, async (req, res) => {
       const query = {};
       const { email } = req.query;
 
@@ -106,7 +106,7 @@ async function run() {
       res.json(result);
     });
 
-    app.post("/user", async (req, res) => {
+    app.post("/user", verifyJWT, async (req, res) => {
       const userData = req.body;
       userData.status = "pending";
       userData.created_at = new Date().toISOString();
@@ -126,12 +126,12 @@ async function run() {
       const result = await usersCollection.insertOne(userData);
       res.send(result);
     });
-    app.get("/user/role", async (req, res) => {
+    app.get("/user/role", verifyJWT, async (req, res) => {
       const email = req.query.email;
       const result = await usersCollection.findOne({ email: email });
       res.send({ role: result?.role });
     });
-    app.patch("/update-status", async (req, res) => {
+    app.patch("/update-status", verifyJWT, async (req, res) => {
       const { email, status, reason, feedback } = req.body;
 
       const updateDoc = {
@@ -164,7 +164,7 @@ async function run() {
 
       res.send(result);
     });
-    app.patch("/products/:id/home", async (req, res) => {
+    app.patch("/products/:id/home", verifyJWT, async (req, res) => {
       const { id } = req.params;
       console.log("PARAM ID:", req.params.id);
 
@@ -428,7 +428,7 @@ async function run() {
       res.send(result);
     });
 
-    app.get('/approve-orders', async (req, res) => {
+    app.get("/approve-orders", async (req, res) => {
       const orders = await ordersCollection
         .find({ status: "approved" })
         .toArray();
