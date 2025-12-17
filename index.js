@@ -98,16 +98,14 @@ async function run() {
       res.send(result);
     });
     app.get("/profile", verifyJWT, async (req, res) => {
-      const query = {};
-      const { email } = req.query;
-
-      const result = await usersCollection.findOne({ email });
+      const result = await usersCollection.findOne({ email: req.tokenEmail });
       console.log(result);
       res.json(result);
     });
 
-    app.post("/user", verifyJWT, async (req, res) => {
+    app.post("/user", async (req, res) => {
       const userData = req.body;
+      console.log(userData);
       userData.status = "pending";
       userData.created_at = new Date().toISOString();
       userData.last_loggedIn = new Date().toISOString();
@@ -127,8 +125,7 @@ async function run() {
       res.send(result);
     });
     app.get("/user/role", verifyJWT, async (req, res) => {
-      const email = req.query.email;
-      const result = await usersCollection.findOne({ email: email });
+      const result = await usersCollection.findOne({ email: req.tokenEmail });
       res.send({ role: result?.role });
     });
     app.patch("/update-status", verifyJWT, async (req, res) => {
@@ -299,7 +296,9 @@ async function run() {
 
           quantity: 1,
           totalPrice: session.amount_total / 100,
-          paymentMethod: "PayFirst",
+          paymentMethod: "Stripe",
+          payment_status: "paid",
+          paidAt: new Date(),
           status: "pending",
           approvedBy: null,
           approvedAt: null,
@@ -330,6 +329,64 @@ async function run() {
         message: "Order already exists or payment not complete",
         transactionId: session.payment_intent,
         trackingId,
+      });
+    });
+    app.post("/create-cod-order", async (req, res) => {
+      const { productId, quantity, buyer } = req.body;
+
+      const product = await productsCollection.findOne({
+        _id: new ObjectId(productId),
+      });
+
+      if (!product)
+        return res.status(404).send({ message: "Product not found" });
+
+      const trackingId = generateTrackingId();
+
+      const orderInfo = {
+        productId: product._id,
+        trackingId: trackingId,
+        transactionId: null,
+
+        buyer: {
+          name: buyer.name,
+          email: buyer.email,
+        },
+
+        product: {
+          name: product.title,
+          category: product.category,
+          image: product.images?.[0] || "",
+          price: product.price,
+        },
+
+        quantity: quantity || 1,
+        totalPrice: product.price * (quantity || 1),
+        paymentMethod: "CashOnDelivery",
+        payment_status: null,
+        paidAt: null,
+        status: "pending",
+        approvedBy: null,
+        approvedAt: null,
+        rejectedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const result = await ordersCollection.insertOne(orderInfo);
+
+      await productsCollection.updateOne(
+        { _id: product._id },
+        { $inc: { availableQuantity: -1 } }
+      );
+
+      await logOrderTracking(trackingId, "Order Created (COD)");
+
+      return res.send({
+        success: true,
+        orderId: result.insertedId,
+        trackingId,
+        message: "COD Order created successfully",
       });
     });
     app.get("/orders", async (req, res) => {
@@ -435,53 +492,66 @@ async function run() {
       res.send(orders);
     });
 
-    // app.post("/payment-success", async (req, res) => {
-    //   const { sessionId } = req.body;
-    //   const session = await stripe.checkout.sessions.retrieve(sessionId);
-    //   const product = await productsCollection.findOne({
-    //     _id: new ObjectId(session.metadata.plantId),
-    //   });
+    app.get("/my-orders", async (req, res) => {
+      const { email } = req.query;
+      const query = { "buyer.email": email };
+      const orders = await ordersCollection.find(query).toArray();
+      res.send(orders);
+    });
 
-    //   const order = await ordersCollection.findOne({
-    //     transactionId: session.payment_intent,
-    //   });
-    //   if (session.status === "complete" && product && !order) {
-    //     //save order data in db
-    //     const orderInfo = {
-    //       productId: session.metadata.plantId,
-    //       transactionId: session.payment_intent,
-    //       Buyer: session.metadata.Buyer,
-    //       status: "pending",
-    //       seller: product.seller,
-    //       name: plant.name,
-    //       category: plant.category,
-    //       quantity: 1,
-    //       price: session.amount_total / 100,
-    //       image: plant?.image,
-    //     };
-    //     console.log(orderInfo);
-    //     // const result = await ordersCollection.insertOne(orderInfo);
-    //     // // update plant quantity
-    //     // await plantsCollection.updateOne(
-    //     //   {
-    //     //     _id: new ObjectId(session.metadata.plantId),
-    //     //   },
-    //     //   { $inc: { quantity: -1 } }
-    //     // );
+    app.delete("/my-orders/:id", async (req, res) => {
+      const { id } = req.params;
+      console.log(id);
+      const result = await ordersCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      res.send(result);
+    });
 
-    //     // return res.send({
-    //     //   transactionId: session.payment_intent,
-    //     //   orderId: result.insertedId,
-    //     // });
-    //   }
-    //   // res.send(
-    //   //   res.send({
-    //   //     transactionId: session.payment_intent,
-    //   //     orderId: order._id,
-    //   //   })
-    //   // );
-    // });
-    // Send a ping to confirm a successful connection
+    app.get("/tracking/:id/timeline", verifyJWT, async (req, res) => {
+      const { id } = req.params; 
+      const items = await trackingsCollection
+        .find({ trackingId: id })
+        .sort({ createdAt: 1 })
+        .toArray();
+
+      const trackOrder = items.map((it) => ({
+        status: it.status,
+        location: it.location,
+        note: it.note,
+        dateTime: it.createdAt,
+      }));
+
+      res.send({ trackOrder });
+    });
+
+    app.patch("/tracking/:id/timeline", verifyJWT, async (req, res) => {
+      const { id } = req.params; 
+      const { status, location, note } = req.body;
+
+      if (!status) {
+        return res.status(400).send({
+          success: false,
+          message: "Status is required",
+        });
+      }
+
+      const log = {
+        trackingId: id,
+        status,
+        location: location || "",
+        note: note || "",
+        createdAt: new Date(),
+      };
+
+      await trackingsCollection.insertOne(log);
+
+      res.send({
+        success: true,
+        message: "Timeline updated successfully",
+      });
+    });
+
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
