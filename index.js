@@ -62,13 +62,36 @@ async function run() {
     const productsCollection = db.collection("products");
     const ordersCollection = db.collection("orders");
     const trackingsCollection = db.collection("trackings");
+
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.tokenEmail;
+      const user = await usersCollection.findOne({ email });
+      if (!user || user?.role !== "Admin")
+        return res
+          .status(403)
+          .send({ message: "Unauthorized access", role: user?.role });
+
+      next();
+    };
+    const verifyManager = async (req, res, next) => {
+      const email = req.tokenEmail;
+      const user = await usersCollection.findOne({ email });
+      if (!user || user?.role !== "Manager")
+        return res
+          .status(403)
+          .send({ message: "Unauthorized access", role: user?.role });
+
+      next();
+    };
     const logOrderTracking = async (
+      orderId,
       trackingId,
       status,
       location = "",
       note = ""
     ) => {
       const log = {
+        orderId,
         trackingId,
         status,
         location,
@@ -77,7 +100,7 @@ async function run() {
       };
       return await trackingsCollection.insertOne(log);
     };
-    app.get("/user", verifyJWT, async (req, res) => {
+    app.get("/user",  async (req, res) => {
       const { searchText, role } = req.query;
       const query = {};
       if (searchText) {
@@ -97,7 +120,7 @@ async function run() {
 
       res.send(result);
     });
-    app.get("/profile", verifyJWT, async (req, res) => {
+    app.get("/profile",verifyJWT, async (req, res) => {
       const result = await usersCollection.findOne({ email: req.tokenEmail });
       console.log(result);
       res.json(result);
@@ -124,11 +147,15 @@ async function run() {
       const result = await usersCollection.insertOne(userData);
       res.send(result);
     });
-    app.get("/user/role", verifyJWT, async (req, res) => {
+    app.get("/user/role",verifyJWT, async (req, res) => {
       const result = await usersCollection.findOne({ email: req.tokenEmail });
       res.send({ role: result?.role });
     });
-    app.patch("/update-status", verifyJWT, async (req, res) => {
+    app.get("/user/status",verifyJWT, async (req, res) => {
+      const result = await usersCollection.findOne({ email: req.tokenEmail });
+      res.send({ status: result?.status });
+    });
+    app.patch("/update-status",  async (req, res) => {
       const { email, status, reason, feedback } = req.body;
 
       const updateDoc = {
@@ -161,20 +188,23 @@ async function run() {
 
       res.send(result);
     });
-    app.patch("/products/:id/home", verifyJWT, async (req, res) => {
-      const { id } = req.params;
-      console.log("PARAM ID:", req.params.id);
+    app.patch(
+      "/products/:id/home",
+    
+      async (req, res) => {
+        const { id } = req.params;
 
-      const { showOnHomePage } = req.body;
+        const { showOnHomePage } = req.body;
 
-      const result = await productsCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { showOnHomePage } }
-      );
+        const result = await productsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { showOnHomePage } }
+        );
 
-      res.send(result);
-    });
-    app.delete("/products/:id", async (req, res) => {
+        res.send(result);
+      }
+    );
+    app.delete("/products/:id",  async (req, res) => {
       const { id } = req.params;
       console.log(id);
       const result = await productsCollection.deleteOne({
@@ -183,7 +213,7 @@ async function run() {
 
       res.send(result);
     });
-    app.patch("/products/:id", async (req, res) => {
+    app.patch("/products/:id",  async (req, res) => {
       const { id } = req.params;
       const updatedData = req.body;
 
@@ -203,7 +233,7 @@ async function run() {
       const result = await productsCollection.find().toArray();
       res.send(result);
     });
-    app.post("/allProducts", async (req, res) => {
+    app.post("/allProducts",  async (req, res) => {
       const productData = req.body;
       productData.created_By = productData.email;
       productData.created_at = new Date();
@@ -282,7 +312,7 @@ async function run() {
           trackingId: trackingId,
           transactionId: session.payment_intent,
 
-          Buyer: {
+          buyer: {
             name: session.metadata.BuyerName,
             email: session.metadata.BuyerEmail,
           },
@@ -308,13 +338,14 @@ async function run() {
         };
 
         const result = await ordersCollection.insertOne(orderInfo);
+        const orderId = result.insertedId;
 
         await productsCollection.updateOne(
           { _id: product._id },
           { $inc: { availableQuantity: -1 } }
         );
 
-        await logOrderTracking(trackingId, "Order Created");
+        await logOrderTracking(orderId, trackingId, "Order Created");
 
         return res.send({
           success: true,
@@ -363,7 +394,7 @@ async function run() {
         quantity: quantity || 1,
         totalPrice: product.price * (quantity || 1),
         paymentMethod: "CashOnDelivery",
-        payment_status: null,
+        payment_status: "cod",
         paidAt: null,
         status: "pending",
         approvedBy: null,
@@ -374,13 +405,13 @@ async function run() {
       };
 
       const result = await ordersCollection.insertOne(orderInfo);
-
+      const orderId = result.insertedId;
       await productsCollection.updateOne(
         { _id: product._id },
         { $inc: { availableQuantity: -1 } }
       );
 
-      await logOrderTracking(trackingId, "Order Created (COD)");
+      await logOrderTracking(orderId, trackingId, "Order Created (COD)");
 
       return res.send({
         success: true,
@@ -389,27 +420,45 @@ async function run() {
         message: "COD Order created successfully",
       });
     });
-    app.get("/orders", async (req, res) => {
-      const { searchText, status } = req.query;
-      const query = {};
-      if (searchText) {
-        query.$or = [
-          { "buyer.name": { $regex: searchText, $options: "i" } },
-          { "buyer.email": { $regex: searchText, $options: "i" } },
-        ];
+    app.get("/orders",  async (req, res) => {
+      try {
+        const { searchText, status, page = 1, limit = 5 } = req.query;
+
+        const query = {};
+
+        if (searchText) {
+          query.$or = [
+            { "buyer.name": { $regex: searchText, $options: "i" } },
+            { "buyer.email": { $regex: searchText, $options: "i" } },
+          ];
+        }
+
+        if (status) {
+          query.status = status;
+        }
+
+        const pageNumber = parseInt(page);
+        const limitNumber = parseInt(limit);
+        const skip = (pageNumber - 1) * limitNumber;
+
+        const totalOrders = await ordersCollection.countDocuments(query);
+
+        const orders = await ordersCollection
+          .find(query)
+          .sort({ created_at: -1 })
+          .skip(skip)
+          .limit(limitNumber)
+          .toArray();
+
+        res.send({
+          orders,
+          totalOrders,
+        });
+      } catch (error) {
+        res.status(500).send({ message: "Failed to fetch orders" });
       }
-
-      if (status) {
-        query.status = status;
-      }
-
-      const result = await ordersCollection
-        .find(query)
-        .sort({ created_at: -1 })
-        .toArray();
-
-      res.send(result);
     });
+
     app.get("/orders/:id", async (req, res) => {
       const id = req.params.id;
       const result = await ordersCollection.findOne({ _id: new ObjectId(id) });
@@ -437,55 +486,63 @@ async function run() {
       const products = await productsCollection.find(query).toArray();
       res.send(products);
     });
-    app.patch("/manage-products/:id", async (req, res) => {
-      const { id } = req.params;
-      const updatedData = req.body;
+    app.patch(
+      "/manage-products/:id",
+     
+      async (req, res) => {
+        const { id } = req.params;
+        const updatedData = req.body;
 
-      updatedData.updated_at = new Date();
+        updatedData.updated_at = new Date();
 
-      const result = await productsCollection.updateOne(
-        { _id: new ObjectId(id) },
-        {
-          $set: updatedData,
-        }
-      );
+        const result = await productsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: updatedData,
+          }
+        );
 
-      res.send(result);
-    });
-    app.get("/orders-pending", async (req, res) => {
+        res.send(result);
+      }
+    );
+    app.get("/orders-pending",  async (req, res) => {
       const orders = await ordersCollection
         .find({ status: "pending" })
         .toArray();
 
       res.send(orders);
     });
-    app.patch("/orders-pending/:id", async (req, res) => {
-      const { id } = req.params;
-      const { status } = req.body;
+    app.patch(
+      "/orders-pending/:id",
+    
+      async (req, res) => {
+        const { id } = req.params;
+        const { status } = req.body;
 
-      const updateDoc = {
-        status,
-      };
+        const updateDoc = {
+          status,
+        };
 
-      if (status === "approved") {
-        updateDoc.approvedAt = new Date();
-        updateDoc.updatedAt = new Date();
+        if (status === "approved") {
+          updateDoc.approvedAt = new Date();
+          updateDoc.updatedAt = new Date();
+        }
+
+        if (status === "rejected") {
+          updateDoc.rejectedAt = new Date();
+          updateDoc.updatedAt = new Date();
+        }
+
+        const result = await ordersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updateDoc }
+        );
+
+        res.send(result);
       }
+    );
 
-      if (status === "rejected") {
-        updateDoc.rejectedAt = new Date();
-        updateDoc.updatedAt = new Date();
-      }
-
-      const result = await ordersCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: updateDoc }
-      );
-
-      res.send(result);
-    });
-
-    app.get("/approve-orders", async (req, res) => {
+    app.get("/approve-orders",  async (req, res) => {
       const orders = await ordersCollection
         .find({ status: "approved" })
         .toArray();
@@ -508,51 +565,67 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/tracking/:id/timeline", verifyJWT, async (req, res) => {
-      const { id } = req.params; 
-      const items = await trackingsCollection
-        .find({ trackingId: id })
-        .sort({ createdAt: 1 })
-        .toArray();
+    app.get("/track-order/:id",  async (req, res) => {
+      try {
+        const { id } = req.params;
 
-      const trackOrder = items.map((it) => ({
-        status: it.status,
-        location: it.location,
-        note: it.note,
-        dateTime: it.createdAt,
-      }));
+        const items = await trackingsCollection
+          .find({ orderId: new ObjectId(id) })
+          .sort({ createdAt: 1 })
+          .toArray();
 
-      res.send({ trackOrder });
-    });
+        const trackOrder = items.map((it) => ({
+          status: it.status,
+          location: it.location,
+          note: it.note,
+          dateTime: it.createdAt,
+        }));
 
-    app.patch("/tracking/:id/timeline", verifyJWT, async (req, res) => {
-      const { id } = req.params; 
-      const { status, location, note } = req.body;
-
-      if (!status) {
-        return res.status(400).send({
-          success: false,
-          message: "Status is required",
+        res.send({ trackOrder, orderId: id });
+      } catch (error) {
+        console.error("Error tracking order:", error);
+        res.status(500).send({
+          message: "Failed to fetch tracking",
+          error: error?.message,
         });
       }
-
-      const log = {
-        trackingId: id,
-        status,
-        location: location || "",
-        note: note || "",
-        createdAt: new Date(),
-      };
-
-      await trackingsCollection.insertOne(log);
-
-      res.send({
-        success: true,
-        message: "Timeline updated successfully",
-      });
     });
 
-    await client.db("admin").command({ ping: 1 });
+    app.patch(
+      "/track-order/:orderId",
+     
+      async (req, res) => {
+        const { orderId } = req.params;
+        const { status, location, note } = req.body;
+
+        if (!status) {
+          return res.status(400).send({
+            success: false,
+            message: "Status is required",
+          });
+        }
+        const order = await ordersCollection.findOne({
+          _id: new ObjectId(orderId),
+        });
+        const log = {
+          orderId: order._id,
+          trackingId: order.trackingId,
+          status,
+          location: location || "",
+          note: note || "",
+          createdAt: new Date(),
+        };
+
+        await trackingsCollection.insertOne(log);
+
+        res.send({
+          success: true,
+          message: "Timeline updated successfully",
+        });
+      }
+    );
+
+    // await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
