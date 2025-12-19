@@ -34,6 +34,8 @@ app.use(express.json());
 // jwt middlewares
 const verifyJWT = async (req, res, next) => {
   const token = req?.headers?.authorization?.split(" ")[1];
+  console.log("HEADERS:", req.headers);
+  console.log("AUTH HEADER:", req.headers.authorization);
   console.log(token);
   if (!token) return res.status(401).send({ message: "Unauthorized Access!" });
   try {
@@ -66,7 +68,7 @@ async function run() {
     const verifyAdmin = async (req, res, next) => {
       const email = req.tokenEmail;
       const user = await usersCollection.findOne({ email });
-      if (!user || user?.role !== "Admin")
+      if (user?.role !== "Admin")
         return res
           .status(403)
           .send({ message: "Unauthorized access", role: user?.role });
@@ -75,8 +77,10 @@ async function run() {
     };
     const verifyManager = async (req, res, next) => {
       const email = req.tokenEmail;
+
       const user = await usersCollection.findOne({ email });
-      if (!user || user?.role !== "Manager")
+
+      if (user?.role !== "Manager")
         return res
           .status(403)
           .send({ message: "Unauthorized access", role: user?.role });
@@ -100,7 +104,7 @@ async function run() {
       };
       return await trackingsCollection.insertOne(log);
     };
-    app.get("/user",  async (req, res) => {
+    app.get("/user", verifyJWT, verifyAdmin, async (req, res) => {
       const { searchText, role } = req.query;
       const query = {};
       if (searchText) {
@@ -120,7 +124,7 @@ async function run() {
 
       res.send(result);
     });
-    app.get("/profile",verifyJWT, async (req, res) => {
+    app.get("/profile", verifyJWT, async (req, res) => {
       const result = await usersCollection.findOne({ email: req.tokenEmail });
       console.log(result);
       res.json(result);
@@ -147,15 +151,15 @@ async function run() {
       const result = await usersCollection.insertOne(userData);
       res.send(result);
     });
-    app.get("/user/role",verifyJWT, async (req, res) => {
+    app.get("/user/role", verifyJWT, async (req, res) => {
       const result = await usersCollection.findOne({ email: req.tokenEmail });
       res.send({ role: result?.role });
     });
-    app.get("/user/status",verifyJWT, async (req, res) => {
+    app.get("/user/status", verifyJWT, async (req, res) => {
       const result = await usersCollection.findOne({ email: req.tokenEmail });
       res.send({ status: result?.status });
     });
-    app.patch("/update-status",  async (req, res) => {
+    app.patch("/update-status", verifyJWT, verifyAdmin, async (req, res) => {
       const { email, status, reason, feedback } = req.body;
 
       const updateDoc = {
@@ -190,7 +194,9 @@ async function run() {
     });
     app.patch(
       "/products/:id/home",
-    
+      verifyJWT,
+      verifyAdmin,
+
       async (req, res) => {
         const { id } = req.params;
 
@@ -204,7 +210,7 @@ async function run() {
         res.send(result);
       }
     );
-    app.delete("/products/:id",  async (req, res) => {
+    app.delete("/products/:id", verifyJWT, async (req, res) => {
       const { id } = req.params;
       console.log(id);
       const result = await productsCollection.deleteOne({
@@ -213,7 +219,7 @@ async function run() {
 
       res.send(result);
     });
-    app.patch("/products/:id",  async (req, res) => {
+    app.patch("/products/:id", verifyJWT, async (req, res) => {
       const { id } = req.params;
       const updatedData = req.body;
 
@@ -233,7 +239,7 @@ async function run() {
       const result = await productsCollection.find().toArray();
       res.send(result);
     });
-    app.post("/allProducts",  async (req, res) => {
+    app.post("/allProducts", verifyJWT, verifyManager, async (req, res) => {
       const productData = req.body;
       productData.created_By = productData.email;
       productData.created_at = new Date();
@@ -420,7 +426,7 @@ async function run() {
         message: "COD Order created successfully",
       });
     });
-    app.get("/orders",  async (req, res) => {
+    app.get("/orders", verifyJWT, async (req, res) => {
       try {
         const { searchText, status, page = 1, limit = 5 } = req.query;
 
@@ -468,7 +474,7 @@ async function run() {
         .toArray();
       res.send({ ...result, trackingHistory });
     });
-    app.get("/manager-created", async (req, res) => {
+    app.get("/manager-created", verifyJWT, verifyManager, async (req, res) => {
       const { email, search, category } = req.query;
 
       const query = {
@@ -488,7 +494,8 @@ async function run() {
     });
     app.patch(
       "/manage-products/:id",
-     
+      verifyJWT,
+      verifyManager,
       async (req, res) => {
         const { id } = req.params;
         const updatedData = req.body;
@@ -505,7 +512,7 @@ async function run() {
         res.send(result);
       }
     );
-    app.get("/orders-pending",  async (req, res) => {
+    app.get("/orders-pending", async (req, res) => {
       const orders = await ordersCollection
         .find({ status: "pending" })
         .toArray();
@@ -514,7 +521,8 @@ async function run() {
     });
     app.patch(
       "/orders-pending/:id",
-    
+      verifyJWT,
+      verifyManager,
       async (req, res) => {
         const { id } = req.params;
         const { status } = req.body;
@@ -542,7 +550,7 @@ async function run() {
       }
     );
 
-    app.get("/approve-orders",  async (req, res) => {
+    app.get("/approve-orders", async (req, res) => {
       const orders = await ordersCollection
         .find({ status: "approved" })
         .toArray();
@@ -556,7 +564,7 @@ async function run() {
       res.send(orders);
     });
 
-    app.delete("/my-orders/:id", async (req, res) => {
+    app.delete("/my-orders/:id", verifyJWT, async (req, res) => {
       const { id } = req.params;
       console.log(id);
       const result = await ordersCollection.deleteOne({
@@ -565,7 +573,7 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/track-order/:id",  async (req, res) => {
+    app.get("/track-order/:id", async (req, res) => {
       try {
         const { id } = req.params;
 
@@ -593,7 +601,8 @@ async function run() {
 
     app.patch(
       "/track-order/:orderId",
-     
+      verifyJWT,
+      verifyManager,
       async (req, res) => {
         const { orderId } = req.params;
         const { status, location, note } = req.body;
