@@ -130,6 +130,31 @@ async function run() {
       res.json(result);
     });
 
+    app.patch("/profile", verifyJWT, async (req, res) => {
+      try {
+        const { name, image } = req.body;
+        const email = req.tokenEmail;
+
+        const updateDoc = {};
+        if (name) updateDoc.name = name;
+        if (image) updateDoc.image = image;
+
+        const result = await usersCollection.updateOne(
+          { email },
+          { $set: updateDoc }
+        );
+
+        if (result.modifiedCount === 0) {
+          return res.status(404).send({ message: "User not found or no changes made" });
+        }
+
+        res.send({ message: "Profile updated successfully", result });
+      } catch (error) {
+        console.error("Error updating profile:", error);
+        res.status(500).send({ message: "Failed to update profile" });
+      }
+    });
+
     app.post("/user", async (req, res) => {
       const userData = req.body;
       console.log(userData);
@@ -236,8 +261,95 @@ async function run() {
     });
 
     app.get("/allProducts", async (req, res) => {
-      const result = await productsCollection.find().toArray();
-      res.send(result);
+      try {
+        const {
+          search = "",
+          category,
+          availability,
+          priceRange,
+          priceMin,
+          priceMax,
+          sort = "name-asc",
+          page = 1,
+          limit = 12,
+        } = req.query;
+
+        const query = {};
+
+        if (search) {
+          query.$or = [
+            { title: { $regex: search, $options: "i" } },
+            { description: { $regex: search, $options: "i" } },
+          ];
+        }
+
+        if (category) {
+          query.category = category;
+        }
+
+        if (availability === "in-stock") {
+          query.availableQuantity = { $gt: 0 };
+        } else if (availability === "out-of-stock") {
+          query.availableQuantity = { $lte: 0 };
+        }
+
+        // priceRange takes precedence over explicit priceMin/priceMax if provided
+        let minPrice = priceMin ? Number(priceMin) : undefined;
+        let maxPrice = priceMax ? Number(priceMax) : undefined;
+        if (priceRange) {
+          if (priceRange === "0-50") {
+            minPrice = 0;
+            maxPrice = 50;
+          } else if (priceRange === "50-100") {
+            minPrice = 50;
+            maxPrice = 100;
+          } else if (priceRange === "100-250") {
+            minPrice = 100;
+            maxPrice = 250;
+          } else if (priceRange === "250+") {
+            minPrice = 250;
+            maxPrice = undefined;
+          }
+        }
+
+        if (Number.isFinite(minPrice) || Number.isFinite(maxPrice)) {
+          query.price = {};
+          if (Number.isFinite(minPrice)) query.price.$gte = minPrice;
+          if (Number.isFinite(maxPrice)) query.price.$lte = maxPrice;
+        }
+
+        let sortStage = { title: 1 };
+        if (sort === "price-asc") sortStage = { price: 1 };
+        else if (sort === "price-desc") sortStage = { price: -1 };
+        else if (sort === "stock-desc") sortStage = { availableQuantity: -1 };
+        else if (sort === "newest") sortStage = { created_at: -1 };
+
+        const pageNumber = Math.max(1, parseInt(page, 10) || 1);
+        const limitNumber = Math.min(
+          50,
+          Math.max(1, parseInt(limit, 10) || 12)
+        );
+        const skip = (pageNumber - 1) * limitNumber;
+
+        const total = await productsCollection.countDocuments(query);
+        const items = await productsCollection
+          .find(query)
+          .sort(sortStage)
+          .skip(skip)
+          .limit(limitNumber)
+          .toArray();
+
+        res.send({
+          items,
+          total,
+          page: pageNumber,
+          pages: Math.max(1, Math.ceil(total / limitNumber)),
+          limit: limitNumber,
+        });
+      } catch (error) {
+        console.error("/allProducts error", error);
+        res.status(500).send({ message: "Failed to fetch products" });
+      }
     });
     app.post("/allProducts", verifyJWT, verifyManager, async (req, res) => {
       const productData = req.body;
